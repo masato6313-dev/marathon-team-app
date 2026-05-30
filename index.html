@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>マラソンチームアプリ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f172a; }
+    nav { scrollbar-width: none; }
+    nav::-webkit-scrollbar { display: none; }
+    input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+    input[type=number] { -moz-appearance: textfield; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+  const { useState, useEffect, useRef } = React;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  //  JSONBin.io 設定（ここを編集してください）
+  // ─────────────────────────────────────────────────────────────────────────────
+  const JSONBIN_API_KEY = "ここにAPIキーを貼る";
+  const JSONBIN_BIN_ID  = "ここにBin IDを貼る";
+
+  // ── 初期データ ────────────────────────────────────────────────────────────────
+  const INITIAL_DATA = {
+    settings: { raceName: "東京マラソン 2025", raceDate: "2025-11-23" },
+    members: ["Masato", "Kenji", "Yuki", "Hana", "Ryo"],
+    goals: { Masato: 200, Kenji: 180, Yuki: 220, Hana: 150, Ryo: 250 },
+    logs: [
+      { id: 1, member: "Masato", date: "2025-06-01", km: 10 },
+      { id: 2, member: "Kenji",  date: "2025-06-02", km: 8 },
+      { id: 3, member: "Yuki",   date: "2025-06-01", km: 12 },
+      { id: 4, member: "Hana",   date: "2025-06-03", km: 6 },
+      { id: 5, member: "Ryo",    date: "2025-06-02", km: 15 },
+      { id: 6, member: "Masato", date: "2025-06-04", km: 7 },
+      { id: 7, member: "Kenji",  date: "2025-06-05", km: 10 },
+      { id: 8, member: "Yuki",   date: "2025-06-04", km: 8 },
+    ],
+    avail: {},
+  };
+
+  const API_READY =
+    JSONBIN_API_KEY !== "ここにAPIキーを貼る" &&
+    JSONBIN_BIN_ID  !== "ここにBin IDを貼る";
+
+  // ── JSONBin.io API ────────────────────────────────────────────────────────────
+  async function fetchData() {
+    if (!API_READY) return INITIAL_DATA;
+    try {
+      const res = await fetch(
+        `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`,
+        { headers: { "X-Master-Key": JSONBIN_API_KEY } }
+      );
+      if (!res.ok) throw new Error(res.statusText);
+      const json = await res.json();
+      return { ...INITIAL_DATA, ...json.record };
+    } catch (e) {
+      console.error("JSONBin fetch error:", e);
+      return INITIAL_DATA;
+    }
+  }
+
+  async function pushData(data) {
+    if (!API_READY) return;
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": JSONBIN_API_KEY,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(res.statusText);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  function daysUntil(dateStr) {
+    const diff = new Date(dateStr) - new Date(today());
+    return Math.ceil(diff / 86400000);
+  }
+
+  function getMonthDays(year, month) {
+    const first = new Date(year, month, 1).getDay();
+    const days = new Date(year, month + 1, 0).getDate();
+    return { first, days };
+  }
+
+  function padded(n) { return String(n).padStart(2, "0"); }
+
+  const MEDAL_COLOR = ["#FFD700", "#C0C0C0", "#CD7F32", "#94a3b8", "#94a3b8"];
+  const MEDAL_EMOJI = ["🥇", "🥈", "🥉", "4位", "5位"];
+
+  // ── App ───────────────────────────────────────────────────────────────────────
+  function App() {
+    const [loading, setLoading]       = useState(true);
+    const [saveStatus, setSaveStatus] = useState(""); // "saving" | "saved" | "error" | ""
+    const [tab, setTab]               = useState("dashboard");
+    const [members, setMembers]       = useState(INITIAL_DATA.members);
+    const [settings, setSettings]     = useState(INITIAL_DATA.settings);
+    const [logs, setLogs]             = useState(INITIAL_DATA.logs);
+    const [goals, setGoals]           = useState(INITIAL_DATA.goals);
+    const [avail, setAvail]           = useState(INITIAL_DATA.avail);
+    const availTimer = useRef(null);
+    const [calMonth, setCalMonth] = useState(() => {
+      const now = new Date();
+      return { year: now.getFullYear(), month: now.getMonth() };
+    });
+
+    useEffect(() => {
+      fetchData().then(data => {
+        setMembers(data.members  || INITIAL_DATA.members);
+        setSettings(data.settings || INITIAL_DATA.settings);
+        setLogs(data.logs        || INITIAL_DATA.logs);
+        setGoals(data.goals      || INITIAL_DATA.goals);
+        setAvail(data.avail      || {});
+        setLoading(false);
+      });
+    }, []);
+
+    async function save(data) {
+      if (!API_READY) return;
+      setSaveStatus("saving");
+      try {
+        await pushData(data);
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus(""), 2000);
+      } catch {
+        setSaveStatus("error");
+        setTimeout(() => setSaveStatus(""), 3000);
+      }
+    }
+
+    function addLog(entry) {
+      const newLogs = [...logs, { id: Date.now(), ...entry }];
+      setLogs(newLogs);
+      save({ settings, members, goals, logs: newLogs, avail });
+    }
+
+    function saveSettings(newSettings, newGoals) {
+      setSettings(newSettings);
+      setGoals(newGoals);
+      save({ settings: newSettings, members, goals: newGoals, logs, avail });
+    }
+
+    function updateAvail(newAvail) {
+      setAvail(newAvail);
+      if (availTimer.current) clearTimeout(availTimer.current);
+      const snap = { settings, members, goals, logs, avail: newAvail };
+      availTimer.current = setTimeout(() => save(snap), 1500);
+    }
+
+    const totalByMember = members.reduce((acc, m) => {
+      acc[m] = logs.filter(l => l.member === m).reduce((s, l) => s + l.km, 0);
+      return acc;
+    }, {});
+
+    const ranked   = [...members].sort((a, b) => totalByMember[b] - totalByMember[a]);
+    const daysLeft = daysUntil(settings.raceDate);
+
+    if (loading) return (
+      <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+        <div style={{ width: 32, height: 32, border: "3px solid #1e293b", borderTopColor: "#38bdf8", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <span style={{ color: "#64748b", fontSize: 14 }}>データを読み込み中...</span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+
+    const saveColor = saveStatus === "error" ? "#f87171" : saveStatus === "saved" ? "#4ade80" : "#94a3b8";
+    const saveLabel = saveStatus === "saving" ? "保存中..." : saveStatus === "saved" ? "✓ 保存済み" : saveStatus === "error" ? "保存エラー" : "";
+
+    return (
+      <div style={styles.root}>
+        {/* Header */}
+        <header style={styles.header}>
+          <div style={styles.headerInner}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={styles.headerRace}>{settings.raceName}</div>
+              {saveLabel && <span style={{ fontSize: 11, color: saveColor, marginTop: 2 }}>{saveLabel}</span>}
+            </div>
+            <div style={styles.headerSub}>
+              <span style={{ color: daysLeft > 30 ? "#4ade80" : "#f87171" }}>
+                {daysLeft > 0 ? `残り ${daysLeft} 日` : "大会終了"}
+              </span>
+              <span style={{ color: "#475569", margin: "0 6px" }}>|</span>
+              <span style={{ color: "#64748b" }}>{settings.raceDate}</span>
+            </div>
+          </div>
+        </header>
+
+        {/* Tabs */}
+        <nav style={styles.nav}>
+          {[
+            { id: "dashboard", label: "📊 概況" },
+            { id: "log",       label: "➕ 記録" },
+            { id: "ranking",   label: "🏆 ランキング" },
+            { id: "schedule",  label: "📅 日程調整" },
+            { id: "settings",  label: "⚙️ 設定" },
+          ].map(t => (
+            <button
+              key={t.id}
+              style={{ ...styles.tabBtn, ...(tab === t.id ? styles.tabActive : {}) }}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Content */}
+        <main style={styles.main}>
+          {tab === "dashboard" && (
+            <Dashboard members={members} ranked={ranked} totalByMember={totalByMember} goals={goals} logs={logs} />
+          )}
+          {tab === "log" && (
+            <LogEntry members={members} onAdd={addLog} />
+          )}
+          {tab === "ranking" && (
+            <Ranking ranked={ranked} totalByMember={totalByMember} goals={goals} />
+          )}
+          {tab === "schedule" && (
+            <Schedule
+              members={members} avail={avail} setAvail={updateAvail}
+              calMonth={calMonth} setCalMonth={setCalMonth}
+              raceDate={settings.raceDate}
+            />
+          )}
+          {tab === "settings" && (
+            <Settings settings={settings} goals={goals} members={members} onSave={saveSettings} />
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // ── Dashboard ─────────────────────────────────────────────────────────────────
+  function Dashboard({ members, ranked, totalByMember, goals, logs }) {
+    const recent = [...logs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+
+    return (
+      <div style={styles.section}>
+        <h2 style={styles.sectionTitle}>チーム概況</h2>
+
+        <div style={styles.goalGrid}>
+          {ranked.map((m, i) => {
+            const pct    = Math.min(100, Math.round((totalByMember[m] / (goals[m] || 1)) * 100));
+            const remain = Math.max(0, (goals[m] || 0) - totalByMember[m]);
+            return (
+              <div key={m} style={styles.goalCard}>
+                <div style={styles.goalCardTop}>
+                  <span style={{ fontSize: 18 }}>{MEDAL_EMOJI[i]}</span>
+                  <span style={styles.goalCardName}>{m}</span>
+                  <span style={styles.goalCardKm}>{totalByMember[m]} km</span>
+                </div>
+                <div style={styles.progressTrack}>
+                  <div style={{ ...styles.progressFill, width: `${pct}%`, background: i === 0 ? "#FFD700" : i === 1 ? "#94a3b8" : i === 2 ? "#CD7F32" : "#38bdf8" }} />
+                </div>
+                <div style={styles.goalCardBot}>
+                  <span style={{ color: "#64748b", fontSize: 11 }}>目標 {goals[m] || 0} km</span>
+                  <span style={{ color: "#94a3b8", fontSize: 11 }}>あと {remain} km ({pct}%)</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <h3 style={styles.subTitle}>最近の記録</h3>
+        <div style={styles.logList}>
+          {recent.map(l => (
+            <div key={l.id} style={styles.logRow}>
+              <div style={styles.logAvatar}>{l.member[0]}</div>
+              <span style={styles.logMember}>{l.member}</span>
+              <span style={styles.logDate}>{l.date}</span>
+              <span style={styles.logKm}>{l.km} km</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Log Entry ─────────────────────────────────────────────────────────────────
+  function LogEntry({ members, onAdd }) {
+    const [member, setMember] = useState(members[0]);
+    const [date, setDate]     = useState(today());
+    const [km, setKm]         = useState("");
+    const [done, setDone]     = useState(false);
+
+    function handleSubmit() {
+      const n = Number(km);
+      if (!n || n <= 0) return;
+      onAdd({ member, date, km: n });
+      setKm("");
+      setDone(true);
+      setTimeout(() => setDone(false), 2000);
+    }
+
+    return (
+      <div style={styles.section}>
+        <h2 style={styles.sectionTitle}>ランニングを記録</h2>
+        <div style={styles.formCard}>
+          <label style={styles.label}>メンバー</label>
+          <div style={styles.memberBtnRow}>
+            {members.map(m => (
+              <button
+                key={m}
+                style={{ ...styles.memberBtn, ...(member === m ? styles.memberBtnActive : {}) }}
+                onClick={() => setMember(m)}
+              >
+                <div style={{ ...styles.memberBtnAvatar, background: member === m ? "linear-gradient(135deg,#38bdf8,#6366f1)" : "#1e293b" }}>{m[0]}</div>
+                <span>{m}</span>
+              </button>
+            ))}
+          </div>
+
+          <label style={styles.label}>日付</label>
+          <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+
+          <label style={styles.label}>距離 (km)</label>
+          <input
+            type="number" min="0.1" step="0.1"
+            style={styles.input} value={km}
+            onChange={e => setKm(e.target.value)}
+            placeholder="例: 10.5"
+          />
+
+          <button
+            style={{ ...styles.primaryBtn, ...(done ? styles.primaryBtnDone : {}) }}
+            onClick={handleSubmit}
+          >
+            {done ? `✅ ${member} の記録を追加しました！` : "記録する"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Ranking ───────────────────────────────────────────────────────────────────
+  function Ranking({ ranked, totalByMember, goals }) {
+    const max = totalByMember[ranked[0]] || 1;
+    return (
+      <div style={styles.section}>
+        <h2 style={styles.sectionTitle}>距離ランキング</h2>
+        {ranked.map((m, i) => {
+          const pct    = Math.round((totalByMember[m] / (goals[m] || 1)) * 100);
+          const remain = Math.max(0, (goals[m] || 0) - totalByMember[m]);
+          return (
+            <div key={m} style={styles.rankRow}>
+              <div style={{ ...styles.rankNum, color: MEDAL_COLOR[i] }}>{MEDAL_EMOJI[i]}</div>
+              <div style={styles.rankInfo}>
+                <div style={styles.rankName}>{m}</div>
+                <div style={styles.rankBarTrack}>
+                  <div style={{ ...styles.rankBarFill, width: `${(totalByMember[m] / max) * 100}%`, background: MEDAL_COLOR[i] }} />
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
+                  目標まであと {remain} km（{pct}% 達成）
+                </div>
+              </div>
+              <div style={styles.rankRight}>
+                <div style={styles.rankKm}>{totalByMember[m]}</div>
+                <div style={{ fontSize: 10, color: "#64748b" }}>km</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── Schedule ──────────────────────────────────────────────────────────────────
+  function Schedule({ members, avail, setAvail, calMonth, setCalMonth, raceDate }) {
+    const [activeMember, setActiveMember] = useState(members[0]);
+    const { year, month } = calMonth;
+    const { first, days } = getMonthDays(year, month);
+
+    function toggleDay(dateStr) {
+      setAvail(prev => {
+        const cur = prev[dateStr] || {};
+        return { ...prev, [dateStr]: { ...cur, [activeMember]: !cur[activeMember] } };
+      });
+    }
+
+    function prevMonth() {
+      setCalMonth(({ year, month }) => month === 0 ? { year: year - 1, month: 11 } : { year, month: month - 1 });
+    }
+    function nextMonth() {
+      setCalMonth(({ year, month }) => month === 11 ? { year: year + 1, month: 0 } : { year, month: month + 1 });
+    }
+
+    const monthStr  = `${year}-${padded(month + 1)}`;
+    const monthName = new Date(year, month, 1).toLocaleDateString("ja-JP", { year: "numeric", month: "long" });
+
+    const fullDays = Array.from({ length: days }, (_, i) => {
+      const d   = `${monthStr}-${padded(i + 1)}`;
+      const cnt = members.filter(m => (avail[d] || {})[m]).length;
+      return { d, cnt };
+    });
+    const bestDays = fullDays.filter(x => x.cnt === members.length).map(x => x.d);
+
+    return (
+      <div style={styles.section}>
+        <h2 style={styles.sectionTitle}>練習日程調整</h2>
+
+        <p style={styles.hint}>入力するメンバーを選んでカレンダーをタップ</p>
+        <div style={styles.memberBtnRow}>
+          {members.map(m => (
+            <button
+              key={m}
+              style={{ ...styles.memberBtn, ...(activeMember === m ? styles.memberBtnActive : {}) }}
+              onClick={() => setActiveMember(m)}
+            >
+              <div style={{ ...styles.memberBtnAvatar, background: activeMember === m ? "linear-gradient(135deg,#38bdf8,#6366f1)" : "#1e293b" }}>{m[0]}</div>
+              <span>{m}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={styles.calNav}>
+          <button style={styles.calNavBtn} onClick={prevMonth}>‹</button>
+          <span style={styles.calMonthLabel}>{monthName}</span>
+          <button style={styles.calNavBtn} onClick={nextMonth}>›</button>
+        </div>
+
+        <div style={styles.calGrid}>
+          {["日","月","火","水","木","金","土"].map(d => (
+            <div key={d} style={styles.calDow}>{d}</div>
+          ))}
+          {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: days }, (_, i) => {
+            const n        = i + 1;
+            const dateStr  = `${monthStr}-${padded(n)}`;
+            const dayAvail = avail[dateStr] || {};
+            const meAvail  = !!dayAvail[activeMember];
+            const cnt      = members.filter(m => dayAvail[m]).length;
+            const isRace   = dateStr === raceDate;
+            const isAll    = cnt === members.length && cnt > 0;
+            return (
+              <button
+                key={n}
+                style={{
+                  ...styles.calDay,
+                  ...(meAvail ? styles.calDayMe : {}),
+                  ...(isAll   ? styles.calDayAll  : {}),
+                  ...(isRace  ? styles.calDayRace : {}),
+                }}
+                onClick={() => !isRace && toggleDay(dateStr)}
+              >
+                <span style={{ fontSize: 12 }}>{n}</span>
+                {!isRace && cnt > 0 && <span style={styles.calCount}>{cnt}/{members.length}</span>}
+                {isRace && <span style={{ fontSize: 8, color: "#f87171" }}>🏁</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={styles.legend}>
+          <LegendItem color="rgba(56,189,248,0.4)" label="自分◯" />
+          <LegendItem color="#4ade80"              label="全員◯" />
+          <LegendItem color="rgba(248,113,113,0.4)" label="大会日" />
+        </div>
+
+        <h3 style={styles.subTitle}>この月の参加可能日数</h3>
+        {members.map(m => {
+          const cnt = Object.entries(avail)
+            .filter(([d]) => d.startsWith(monthStr))
+            .filter(([_, v]) => v[m]).length;
+          return (
+            <div key={m} style={{ ...styles.availRow, ...(m === activeMember ? { background: "rgba(56,189,248,0.05)", borderRadius: 8, padding: "7px 10px" } : {}) }}>
+              <div style={styles.logAvatar}>{m[0]}</div>
+              <span style={styles.availName}>{m}</span>
+              <span style={styles.availCnt}>{cnt} 日</span>
+            </div>
+          );
+        })}
+
+        {bestDays.length > 0 && (
+          <div style={styles.bestDaysBox}>
+            🎉 全員参加可能な日：{bestDays.map(d => d.slice(5).replace("-", "/")).join("、")}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function LegendItem({ color, label }) {
+    return (
+      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ width: 12, height: 12, borderRadius: 3, background: color, display: "inline-block" }} />
+        {label}
+      </span>
+    );
+  }
+
+  // ── Settings ──────────────────────────────────────────────────────────────────
+  function Settings({ settings, goals, members, onSave }) {
+    const [raceName,    setRaceName]    = useState(settings.raceName);
+    const [raceDate,    setRaceDate]    = useState(settings.raceDate);
+    const [localGoals,  setLocalGoals]  = useState({ ...goals });
+    const [saved, setSaved] = useState(false);
+
+    function save() {
+      onSave({ raceName, raceDate }, localGoals);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
+
+    return (
+      <div style={styles.section}>
+        <h2 style={styles.sectionTitle}>設定</h2>
+        <div style={styles.formCard}>
+          <label style={styles.label}>大会名</label>
+          <input style={styles.input} value={raceName} onChange={e => setRaceName(e.target.value)} />
+
+          <label style={styles.label}>大会日</label>
+          <input type="date" style={styles.input} value={raceDate} onChange={e => setRaceDate(e.target.value)} />
+
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 4 }}>
+            <label style={{ ...styles.label, marginBottom: 8, display: "block" }}>各メンバーの目標距離 (km)</label>
+            {members.map(m => (
+              <div key={m} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <div style={{ ...styles.logAvatar, flexShrink: 0 }}>{m[0]}</div>
+                <span style={{ flex: 1, fontSize: 14, color: "#e2e8f0" }}>{m}</span>
+                <input
+                  type="number" min="1"
+                  style={{ ...styles.input, width: 90 }}
+                  value={localGoals[m] || ""}
+                  onChange={e => setLocalGoals(prev => ({ ...prev, [m]: Number(e.target.value) }))}
+                />
+              </div>
+            ))}
+          </div>
+
+          <button
+            style={{ ...styles.primaryBtn, ...(saved ? styles.primaryBtnDone : {}) }}
+            onClick={save}
+          >
+            {saved ? "✅ 保存しました" : "保存する"}
+          </button>
+
+          {!API_READY && (
+            <p style={{ fontSize: 11, color: "#f87171", marginTop: 4, lineHeight: 1.5 }}>
+              ⚠️ JSONBin.io の APIキー・Bin ID が未設定です。<br />
+              index.html の先頭にある JSONBIN_API_KEY と JSONBIN_BIN_ID を設定するとデータがクラウドに保存されます。
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Styles ────────────────────────────────────────────────────────────────────
+  const styles = {
+    root: {
+      minHeight: "100vh",
+      background: "#0f172a",
+      color: "#e2e8f0",
+      fontFamily: "'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif",
+      paddingBottom: 40,
+    },
+    header: {
+      background: "linear-gradient(135deg,#1e293b,#0f172a)",
+      borderBottom: "1px solid rgba(56,189,248,0.15)",
+      padding: "14px 16px",
+    },
+    headerInner: { maxWidth: 640, margin: "0 auto" },
+    headerRace: { fontSize: 16, fontWeight: 800, color: "#f0f9ff", letterSpacing: "-0.3px" },
+    headerSub: { fontSize: 12, marginTop: 3, display: "flex", alignItems: "center" },
+
+    nav: {
+      display: "flex", overflowX: "auto",
+      background: "#1e293b",
+      borderBottom: "1px solid rgba(56,189,248,0.12)",
+      padding: "0 8px", gap: 2,
+    },
+    tabBtn: {
+      flex: "none", padding: "10px 13px",
+      background: "none", border: "none",
+      color: "#64748b", fontSize: 12,
+      cursor: "pointer", whiteSpace: "nowrap",
+      borderBottom: "2px solid transparent",
+      transition: "all 0.2s",
+    },
+    tabActive: { color: "#38bdf8", borderBottomColor: "#38bdf8" },
+
+    main: { maxWidth: 640, margin: "0 auto", padding: "16px 12px" },
+    section: {},
+    sectionTitle: { fontSize: 18, fontWeight: 700, color: "#f0f9ff", marginBottom: 16, letterSpacing: "-0.4px" },
+    subTitle: { fontSize: 13, fontWeight: 600, color: "#64748b", marginTop: 22, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.5px" },
+
+    goalGrid: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 },
+    goalCard: {
+      background: "#1e293b", borderRadius: 12,
+      padding: "12px 14px",
+      border: "1px solid rgba(255,255,255,0.05)",
+    },
+    goalCardTop: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 },
+    goalCardName: { flex: 1, fontSize: 14, fontWeight: 600, color: "#e2e8f0" },
+    goalCardKm: { fontSize: 16, fontWeight: 800, color: "#38bdf8" },
+    progressTrack: { height: 5, background: "#0f172a", borderRadius: 3, overflow: "hidden", marginBottom: 5 },
+    progressFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },
+    goalCardBot: { display: "flex", justifyContent: "space-between" },
+
+    logList: { display: "flex", flexDirection: "column", gap: 6 },
+    logRow: {
+      display: "flex", alignItems: "center",
+      background: "#1e293b", borderRadius: 8,
+      padding: "8px 12px", gap: 10,
+      border: "1px solid rgba(255,255,255,0.04)",
+    },
+    logAvatar: {
+      width: 28, height: 28, borderRadius: "50%",
+      background: "linear-gradient(135deg,#334155,#475569)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 12, fontWeight: 700, color: "#e2e8f0", flexShrink: 0,
+    },
+    logMember: { flex: 1, fontSize: 13, fontWeight: 600, color: "#e2e8f0" },
+    logDate: { fontSize: 11, color: "#64748b" },
+    logKm: { fontSize: 14, fontWeight: 700, color: "#38bdf8" },
+
+    formCard: {
+      background: "#1e293b", borderRadius: 14, padding: 20,
+      display: "flex", flexDirection: "column", gap: 12,
+      border: "1px solid rgba(56,189,248,0.1)",
+    },
+    label: { fontSize: 12, color: "#94a3b8", fontWeight: 600 },
+    memberBtnRow: { display: "flex", flexWrap: "wrap", gap: 8 },
+    memberBtn: {
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+      background: "#0f172a", border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: 10, padding: "10px 12px",
+      color: "#94a3b8", cursor: "pointer", fontSize: 12, fontWeight: 600,
+      transition: "all 0.15s",
+    },
+    memberBtnActive: { border: "1px solid rgba(56,189,248,0.6)", color: "#e2e8f0" },
+    memberBtnAvatar: {
+      width: 32, height: 32, borderRadius: "50%",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 14, fontWeight: 700, color: "#fff",
+    },
+    input: {
+      background: "#0f172a", border: "1px solid rgba(56,189,248,0.2)",
+      borderRadius: 8, padding: "10px 12px",
+      color: "#e2e8f0", fontSize: 14, width: "100%",
+      boxSizing: "border-box", outline: "none",
+    },
+    primaryBtn: {
+      background: "linear-gradient(135deg,#38bdf8,#6366f1)",
+      border: "none", borderRadius: 10,
+      padding: "12px 0", fontSize: 15, fontWeight: 700,
+      color: "#fff", cursor: "pointer", marginTop: 4,
+    },
+    primaryBtnDone: { background: "linear-gradient(135deg,#4ade80,#22c55e)" },
+
+    rankRow: {
+      display: "flex", alignItems: "center",
+      background: "#1e293b", borderRadius: 12,
+      padding: "12px 14px", marginBottom: 8, gap: 12,
+      border: "1px solid rgba(255,255,255,0.04)",
+    },
+    rankNum: { fontSize: 22, width: 34, textAlign: "center", flexShrink: 0 },
+    rankInfo: { flex: 1 },
+    rankName: { fontSize: 14, fontWeight: 600, color: "#e2e8f0", marginBottom: 6 },
+    rankBarTrack: { height: 5, background: "#0f172a", borderRadius: 3, overflow: "hidden" },
+    rankBarFill: { height: "100%", borderRadius: 3, transition: "width 0.6s ease" },
+    rankRight: { textAlign: "right", flexShrink: 0 },
+    rankKm: { fontSize: 18, fontWeight: 800, color: "#38bdf8" },
+
+    hint: { fontSize: 12, color: "#94a3b8", marginTop: -8, marginBottom: 12 },
+    calNav: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "14px 0 10px" },
+    calNavBtn: {
+      background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.2)",
+      borderRadius: 8, color: "#38bdf8", fontSize: 20,
+      padding: "4px 16px", cursor: "pointer",
+    },
+    calMonthLabel: { fontSize: 15, fontWeight: 700, color: "#e2e8f0" },
+    calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 3, marginBottom: 10 },
+    calDow: { textAlign: "center", fontSize: 10, color: "#475569", padding: "4px 0" },
+    calDay: {
+      aspectRatio: "1", borderRadius: 7,
+      background: "#1e293b", border: "1px solid rgba(255,255,255,0.06)",
+      color: "#64748b", cursor: "pointer",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center", gap: 1,
+    },
+    calDayMe:   { background: "rgba(56,189,248,0.22)", border: "1px solid rgba(56,189,248,0.55)", color: "#e2e8f0" },
+    calDayAll:  { background: "rgba(74,222,128,0.2)",  border: "1px solid #4ade80",               color: "#fff" },
+    calDayRace: { background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.5)", cursor: "default" },
+    calCount: { fontSize: 9, color: "#94a3b8" },
+    legend: { display: "flex", gap: 14, fontSize: 11, color: "#64748b", marginBottom: 14, flexWrap: "wrap" },
+    availRow: { display: "flex", alignItems: "center", padding: "7px 0", gap: 10, borderBottom: "1px solid rgba(255,255,255,0.04)" },
+    availName: { flex: 1, fontSize: 14, color: "#e2e8f0" },
+    availCnt: { fontSize: 14, fontWeight: 700, color: "#38bdf8" },
+    bestDaysBox: {
+      marginTop: 16, background: "rgba(74,222,128,0.08)",
+      border: "1px solid rgba(74,222,128,0.3)",
+      borderRadius: 10, padding: "12px 14px",
+      fontSize: 13, color: "#4ade80", lineHeight: 1.6,
+    },
+  };
+
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
