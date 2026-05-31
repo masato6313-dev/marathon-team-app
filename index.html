@@ -98,6 +98,18 @@
 
   function padded(n) { return String(n).padStart(2, "0"); }
 
+  // 皇居1周 = 5km
+  const KOKEN_KM = 5;
+  function toKoken(km) {
+    const laps = km / KOKEN_KM;
+    if (laps === 0) return "0";
+    return Number.isInteger(laps) ? `${laps}` : laps.toFixed(1);
+  }
+  // "10 km / 皇居2周" のような文字列を返す
+  function fmtKm(km) {
+    return `${km} km / 皇居${toKoken(km)}周`;
+  }
+
   const MEDAL_COLOR = ["#FFD700", "#C0C0C0", "#CD7F32", "#94a3b8", "#94a3b8"];
   const MEDAL_EMOJI = ["🥇", "🥈", "🥉", "4位", "5位"];
 
@@ -343,14 +355,17 @@
                 <div style={styles.goalCardTop}>
                   <span style={{ fontSize: 18 }}>{MEDAL_EMOJI[i]}</span>
                   <span style={styles.goalCardName}>{m}</span>
-                  <span style={styles.goalCardKm}>{totalByMember[m]} km</span>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={styles.goalCardKm}>{totalByMember[m]} km</div>
+                    <div style={{ fontSize: 10, color: "#64748b" }}>皇居{toKoken(totalByMember[m])}周</div>
+                  </div>
                 </div>
                 <div style={styles.progressTrack}>
                   <div style={{ ...styles.progressFill, width: `${pct}%`, background: i === 0 ? "#FFD700" : i === 1 ? "#94a3b8" : i === 2 ? "#CD7F32" : "#38bdf8" }} />
                 </div>
                 <div style={styles.goalCardBot}>
-                  <span style={{ color: "#64748b", fontSize: 11 }}>目標 {goals[m] || 0} km</span>
-                  <span style={{ color: "#94a3b8", fontSize: 11 }}>あと {remain} km ({pct}%)</span>
+                  <span style={{ color: "#64748b", fontSize: 11 }}>目標 {fmtKm(goals[m] || 0)}</span>
+                  <span style={{ color: "#94a3b8", fontSize: 11 }}>あと {fmtKm(remain)} ({pct}%)</span>
                 </div>
               </div>
             );
@@ -364,7 +379,10 @@
               <div style={styles.logAvatar}>{l.member[0]}</div>
               <span style={styles.logMember}>{l.member}</span>
               <span style={styles.logDate}>{l.date}</span>
-              <span style={styles.logKm}>{l.km} km</span>
+              <div style={{ textAlign: "right" }}>
+                <div style={styles.logKm}>{l.km} km</div>
+                <div style={{ fontSize: 10, color: "#64748b" }}>皇居{toKoken(l.km)}周</div>
+              </div>
             </div>
           ))}
         </div>
@@ -455,6 +473,31 @@
             placeholder="例: 10.5"
           />
 
+          {/* 皇居プリセット */}
+          <div>
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>🏯 皇居周回で選ぶ</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[0.5, 1, 2, 3, 4, 5].map(n => {
+                const val = String(n * KOKEN_KM);
+                const active = km === val;
+                return (
+                  <button
+                    key={n}
+                    onClick={() => setKm(val)}
+                    style={{
+                      background: active ? "rgba(56,189,248,0.2)" : "rgba(255,255,255,0.05)",
+                      border: `1px solid ${active ? "rgba(56,189,248,0.6)" : "rgba(255,255,255,0.1)"}`,
+                      borderRadius: 7, color: active ? "#38bdf8" : "#94a3b8",
+                      fontSize: 12, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {n}周 <span style={{ color: "#475569" }}>({n * KOKEN_KM}km)</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <button
             style={{ ...styles.primaryBtn, ...(done ? styles.primaryBtnDone : {}) }}
             onClick={handleSubmit}
@@ -492,7 +535,10 @@
                 <div style={styles.logAvatar}>{l.member[0]}</div>
                 <span style={{ ...styles.logMember, minWidth: 0 }}>{l.member}</span>
                 <span style={styles.logDate}>{l.date}</span>
-                <span style={styles.logKm}>{l.km} km</span>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={styles.logKm}>{l.km} km</div>
+                  <div style={{ fontSize: 10, color: "#64748b" }}>皇居{toKoken(l.km)}周</div>
+                </div>
                 <button onClick={() => { startEdit(l); }} style={{ ...btnSm, color: "#38bdf8", borderColor: "rgba(56,189,248,0.3)", flexShrink: 0 }}>編集</button>
                 {confirmDeleteId === l.id ? (
                   <span style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
@@ -531,12 +577,13 @@
                   <div style={{ ...styles.rankBarFill, width: `${(totalByMember[m] / max) * 100}%`, background: MEDAL_COLOR[i] }} />
                 </div>
                 <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
-                  目標まであと {remain} km（{pct}% 達成）
+                  あと {fmtKm(remain)}（{pct}% 達成）
                 </div>
               </div>
               <div style={styles.rankRight}>
                 <div style={styles.rankKm}>{totalByMember[m]}</div>
                 <div style={{ fontSize: 10, color: "#64748b" }}>km</div>
+                <div style={{ fontSize: 10, color: "#64748b" }}>皇居{toKoken(totalByMember[m])}周</div>
               </div>
             </div>
           );
