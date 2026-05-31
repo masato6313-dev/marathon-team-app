@@ -192,14 +192,42 @@
     const saveColor = saveStatus === "error" ? "#f87171" : saveStatus === "saved" ? "#4ade80" : "#94a3b8";
     const saveLabel = saveStatus === "saving" ? "保存中..." : saveStatus === "saved" ? "✓ 保存済み" : saveStatus === "error" ? "保存エラー" : "";
 
+    async function reloadFromCloud() {
+      if (!API_READY) return;
+      setLoading(true);
+      const data = await fetchData();
+      setMembers(data.members  || INITIAL_DATA.members);
+      setSettings(data.settings || INITIAL_DATA.settings);
+      setLogs(data.logs        || INITIAL_DATA.logs);
+      setGoals(data.goals      || INITIAL_DATA.goals);
+      setAvail(data.avail      || {});
+      setLoading(false);
+    }
+
     return (
       <div style={styles.root}>
         {/* Header */}
         <header style={styles.header}>
           <div style={styles.headerInner}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={styles.headerRace}>{settings.raceName}</div>
-              {saveLabel && <span style={{ fontSize: 11, color: saveColor, marginTop: 2 }}>{saveLabel}</span>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {saveLabel && <span style={{ fontSize: 11, color: saveColor }}>{saveLabel}</span>}
+                {API_READY && (
+                  <button
+                    onClick={reloadFromCloud}
+                    title="クラウドから最新データを取得"
+                    style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.25)", borderRadius: 6, color: "#38bdf8", fontSize: 14, padding: "3px 8px", cursor: "pointer" }}
+                  >
+                    🔄
+                  </button>
+                )}
+                {!API_READY && (
+                  <span style={{ fontSize: 10, color: "#f87171", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 5, padding: "2px 6px" }}>
+                    未接続
+                  </span>
+                )}
+              </div>
             </div>
             <div style={styles.headerSub}>
               <span style={{ color: daysLeft > 30 ? "#4ade80" : "#f87171" }}>
