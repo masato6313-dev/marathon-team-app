@@ -111,11 +111,18 @@
     const [logs, setLogs]             = useState(INITIAL_DATA.logs);
     const [goals, setGoals]           = useState(INITIAL_DATA.goals);
     const [avail, setAvail]           = useState(INITIAL_DATA.avail);
-    const availTimer = useRef(null);
     const [calMonth, setCalMonth] = useState(() => {
       const now = new Date();
       return { year: now.getFullYear(), month: now.getMonth() };
     });
+
+    // ── 常に最新の全状態を保持するref（保存時の競合防止） ────────────────────
+    const stateRef  = useRef({ settings, members, goals, logs, avail });
+    const saveTimer = useRef(null);
+
+    useEffect(() => {
+      stateRef.current = { settings, members, goals, logs, avail };
+    }, [settings, members, goals, logs, avail]);
 
     useEffect(() => {
       fetchData().then(data => {
@@ -128,64 +135,61 @@
       });
     }, []);
 
-    async function save(data) {
+    // 300ms debounce で常に最新状態を1回だけ保存（競合なし）
+    function scheduleSave() {
       if (!API_READY) return;
-      setSaveStatus("saving");
-      try {
-        await pushData(data);
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus(""), 2000);
-      } catch {
-        setSaveStatus("error");
-        setTimeout(() => setSaveStatus(""), 3000);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(async () => {
+        saveTimer.current = null;
+        setSaveStatus("saving");
+        try {
+          await pushData(stateRef.current);
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus(""), 2000);
+        } catch {
+          setSaveStatus("error");
+          setTimeout(() => setSaveStatus(""), 3000);
+        }
+      }, 300);
+    }
+
+    // リロード前に未送信の保存を即時フラッシュ
+    async function flushSave() {
+      if (!API_READY) return;
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
       }
+      try {
+        await pushData(stateRef.current);
+      } catch {}
     }
 
     function addLog(entry) {
-      const newLogs = [...logs, { id: Date.now(), ...entry }];
-      setLogs(newLogs);
-      save({ settings, members, goals, logs: newLogs, avail });
+      setLogs(prev => [...prev, { id: Date.now(), ...entry }]);
+      scheduleSave();
+    }
+
+    function editLog(id, updates) {
+      setLogs(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
+      scheduleSave();
+    }
+
+    function deleteLog(id) {
+      setLogs(prev => prev.filter(l => l.id !== id));
+      scheduleSave();
     }
 
     function saveSettings(newSettings, newGoals, newMembers) {
       setSettings(newSettings);
       setGoals(newGoals);
       setMembers(newMembers);
-      save({ settings: newSettings, members: newMembers, goals: newGoals, logs, avail });
-    }
-
-    function editLog(id, updates) {
-      const newLogs = logs.map(l => l.id === id ? { ...l, ...updates } : l);
-      setLogs(newLogs);
-      save({ settings, members, goals, logs: newLogs, avail });
-    }
-
-    function deleteLog(id) {
-      const newLogs = logs.filter(l => l.id !== id);
-      setLogs(newLogs);
-      save({ settings, members, goals, logs: newLogs, avail });
+      scheduleSave();
     }
 
     function updateAvail(newAvail) {
-      if (typeof newAvail === "function") {
-        // 関数が渡された場合（toggleDay の functional update）は現在のavailで解決する
-        newAvail = newAvail(avail);
-      }
       setAvail(newAvail);
-      if (availTimer.current) clearTimeout(availTimer.current);
-      const snap = { settings, members, goals, logs, avail: newAvail };
-      availTimer.current = setTimeout(() => {
-        save(snap);
-        availTimer.current = null;
-      }, 500);
-    }
-
-    async function flushPendingAvailSave() {
-      if (availTimer.current) {
-        clearTimeout(availTimer.current);
-        availTimer.current = null;
-        await pushData({ settings, members, goals, logs, avail });
-      }
+      scheduleSave();
     }
 
     const totalByMember = members.reduce((acc, m) => {
@@ -209,8 +213,7 @@
 
     async function reloadFromCloud() {
       if (!API_READY) return;
-      // 未保存の日程データがあれば先に保存してからリロード
-      await flushPendingAvailSave();
+      await flushSave();   // 未送信の保存を先にフラッシュ
       setLoading(true);
       const data = await fetchData();
       setMembers(data.members  || INITIAL_DATA.members);
