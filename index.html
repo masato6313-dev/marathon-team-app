@@ -20,15 +20,17 @@
   <div id="root"></div>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
   <script type="text/babel">
   const { useState, useEffect, useRef } = React;
 
   // ─────────────────────────────────────────────────────────────────────────────
   //  JSONBin.io 設定（ここを編集してください）
+  //  ※ Master Key は使わない。JSONBin ダッシュボードで Read + Update のみ許可した
+  //    Access Key を発行し、その値を下に貼る（X-Access-Key 方式）。
   // ─────────────────────────────────────────────────────────────────────────────
-  const JSONBIN_API_KEY = "$2a$10$KJDnoGzXeC.hF7c1u/T9TuJ7iVIVn1bYZqhONzkgP/rudDB9uF04W";
-  const JSONBIN_BIN_ID  = "6a1ab28d21f9ee59d29d3c1a";
+  const JSONBIN_ACCESS_KEY = "$2a$10$RG1W85CExmby5P/smPAzQe8uaED8mzUTnCpo1Q8yZxokcl4fzlCUW";
+  const JSONBIN_BIN_ID     = "6a1ab28d21f9ee59d29d3c1a";
 
   // ── 初期データ ────────────────────────────────────────────────────────────────
   const INITIAL_DATA = {
@@ -40,8 +42,8 @@
   };
 
   const API_READY =
-    JSONBIN_API_KEY !== "ここにAPIキーを貼る" &&
-    JSONBIN_BIN_ID  !== "ここにBin IDを貼る";
+    JSONBIN_ACCESS_KEY !== "ここにAccess Keyを貼る" &&
+    JSONBIN_BIN_ID     !== "ここにBin IDを貼る";
 
   // ── JSONBin.io API ────────────────────────────────────────────────────────────
   async function fetchData() {
@@ -49,7 +51,7 @@
     try {
       const res = await fetch(
         `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`,
-        { headers: { "X-Master-Key": JSONBIN_API_KEY } }
+        { headers: { "X-Access-Key": JSONBIN_ACCESS_KEY } }
       );
       if (!res.ok) throw new Error(res.statusText);
       const json = await res.json();
@@ -66,7 +68,7 @@
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "X-Master-Key": JSONBIN_API_KEY,
+        "X-Access-Key": JSONBIN_ACCESS_KEY,
       },
       body: JSON.stringify(data),
     });
@@ -196,7 +198,8 @@
     }
 
     const totalByMember = members.reduce((acc, m) => {
-      acc[m] = logs.filter(l => l.member === m).reduce((s, l) => s + l.km, 0);
+      const sum = logs.filter(l => l.member === m).reduce((s, l) => s + l.km, 0);
+      acc[m] = Math.round(sum * 10) / 10;
       return acc;
     }, {});
 
